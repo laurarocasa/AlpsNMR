@@ -164,7 +164,7 @@ tibble_lists_columns_to_vector_columns <- function(data) {
     
     # Do the conversion
     data2 <-
-        tidyr::unnest(data, cols = tidyselect::one_of(to_simplify))
+        tidyr::unnest(data, cols = dplyr::all_of(to_simplify))
     data2 <-
         data2[, colnames(data)] # Preserve original column order
     return(data2)
@@ -178,6 +178,59 @@ tibble_lists_columns_to_vector_columns <- function(data) {
 show_progress_bar <- function(...) {
     all(...) && interactive() && is.null(getOption("knitr.in.progress"))
 }
+
+progress_bar_new <- function(name, total) {
+  have_pkg_progressr <- requireNamespace("progressr", quietly = TRUE)
+  if (have_pkg_progressr) {
+    return(progressr::progressor(steps = total, message = name))
+  }
+  # fallback txtprogressbar:
+  return(utils::txtProgressBar(min = 0, max = total, style = 3))
+}
+
+progress_bar_update <- function(pb) {
+  have_pkg_progressr <- requireNamespace("progressr", quietly = TRUE)
+  if (have_pkg_progressr) {
+    if (is.null(pb)) {
+      return(NULL)
+    }
+    return(pb())
+  }
+  if (inherits(pb, "txtProgressBar")) {
+    value <- pb$getVal()
+    pb$up(value+1L)
+  }
+}
+
+progress_bar_end <- function(pb) {
+  have_pkg_progressr <- requireNamespace("progressr", quietly = TRUE)
+  if (have_pkg_progressr) {
+    return(invisible(NULL))
+  }
+  if (inherits(pb, "txtProgressBar")) {
+    return(close(pb))
+  }
+}
+
+warn_future_to_biocparallel <- function() {
+    # REMOVE THIS WARNING >ONE YEAR AFTER IT'S BEEN RELEASED to BIOCONDUCTOR
+    current_plan <- future::plan()
+    if (inherits(current_plan, "sequential")) {
+        return()
+    }
+    rlang::warn(
+        message = c(
+            "AlpsNMR now uses BiocParallel instead of future for parallellization",
+            "i" = "If you used plan(multisession), plan(multiprocess), or other plan(), consider removing all plan() calls and use:\n    library(BiocParallel)\n    register(SnowParam(workers = 3), default = TRUE)",
+            "i" = 'You just need to place that code once, typically at the beginning of your script'
+        ),
+        class = "AlpsNMR-future-to-biocparallel-warning",
+        .frequency = "once",
+        .frequency_id = "future-to-biocparallel"
+    )
+    return()
+}
+
 
 #' Convert to ChemoSpec Spectra class
 #' @param nmr_dataset An [nmr_dataset_1D] object
@@ -220,4 +273,10 @@ to_ChemoSpec <- function(nmr_dataset, desc = "A nmr_dataset", group = NULL) {
     names(Spectra) <- c("freq", "data", "names", "groups", "colors", "sym", "alt.sym", "unit", "desc")
     ChemoSpec::chkSpectra(Spectra)
     return(Spectra)
+}
+
+
+abort_if_not <- function(condition, ...) {
+    if (!condition)
+        rlang::abort(...)
 }

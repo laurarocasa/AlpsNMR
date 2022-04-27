@@ -17,9 +17,13 @@
 #'
 #' #nmr_detect_peaks_plot(sample_10, peak_data, "NMRExp_ref")
 #' 
-#' peaks_detected <- nmr_detect_peaks_tune_snr(sample_10, 
-#'                                             SNR_thresholds = seq(from = 2, 
-#'                                             to = 3, by = 0.5))
+#' peaks_detected <- nmr_detect_peaks_tune_snr(
+#'   sample_10, 
+#'   SNR_thresholds = seq(from = 2, to = 3, by = 0.5),
+#'   nDivRange_ppm = 0.03,
+#'   scales = seq(1, 16, 2),
+#'   baselineThresh = 0
+#' )
 #'
 #' 
 #' # 2.Find the reference spectrum to align with.
@@ -63,103 +67,124 @@ NULL
 #' @param nmr_dataset An [nmr_dataset_1D].
 #' @param nDivRange_ppm Segment size, in ppms, to divide the spectra and search
 #'     for peaks.
-#' @param baselineThresh    It will remove all peaks under an intensity set by
-#'     baselineThresh. If you set it to 'NULL', nmr_detect_peaks will
-#'     automatically compute an aproximate value considering baseline between 9.5
-#'     and 10.0 ppm (automatically calculation using `baselineThresh = NULL` will
-#'     not work if spectra were not interpolated up to 10.0 ppm)
+#' @param baselineThresh It will remove all peaks under an intensity set by
+#'     `baselineThresh`. If you set it to `NULL`, `nmr_detect_peaks()` will
+#'     automatically estimate the baseline on the region given by the
+#'     `range_without_peaks` argument.
 #' @inheritParams speaq::detectSpecPeaks
+#' @param range_without_peaks A numeric vector of length two with a region without peaks, only used when `baselineThresh = NULL`
+#' @param verbose Logical (`TRUE` or `FALSE`). Show informational messages, such as the estimated baseline
 #' @return A data frame with the NMRExperiment, the sample index, the position
 #'     in ppm and index and the peak intensity
-#' 
+#' @seealso Peak_detection
 #' @export
-#' @rdname Peak_detection
 nmr_detect_peaks <- function(nmr_dataset,
                              nDivRange_ppm = 0.1,
                              scales = seq(1, 16, 2),
                              baselineThresh = NULL,
-                             SNR.Th = 3) {
-    validate_nmr_dataset_1D(nmr_dataset)
+                             SNR.Th = 3,
+                             range_without_peaks = c(9.5, 10),
+                             verbose = FALSE) {
+    nmr_dataset <- validate_nmr_dataset_1D(nmr_dataset)
     
     # Convert ppm to number of data points
     ppm_resolution <- stats::median(diff(nmr_dataset$axis))
     nDivRange <- round(nDivRange_ppm / ppm_resolution)
     
-    # Computes the Baseline Threshold ###NEW###
+    # Computes the Baseline Threshold
     if (is.null(baselineThresh)) {
-        baselineThresh <- nmr_baseline_threshold(nmr_dataset)
+        baselineThresh <- nmr_baseline_threshold(
+            nmr_dataset,
+            range_without_peaks = range_without_peaks
+        )
+        if (isTRUE(verbose)) {
+            rlang::inform(
+                message = c(
+                    "i" = glue::glue("Using baselineThresh={baselineThresh}", baselineThresh=baselineThresh)
+                )
+            )
+            rlang::inform(
+                message = c(
+                    "i" = glue::glue(
+                        "You may plot(<your-dataset>, chemshift_range=c({rmin}, {rmax})) ",
+                        "to assess that the baselineThresh was estimated correctly",
+                        rmin = range_without_peaks[1], rmax = range_without_peaks[2]
+                    )
+                ),
+                .frequency = "regularly",
+                .frequency_id = "suggest-plot-for-baseline-threshold-estimation"
+            )
+        }
     }
-    
-    
-    # A dependency of the speaq package uses partial matching of arguments.
-    #
-    # ## What is partial argument matching?
-    # partial matching is an R feature that allows to call functions without
-    # fully specifying the arguments, for instance:
-    # nmr_detect_peaks(n = dataset)
-    # nmr_detect_peaks(nmr_dat = dataset)
-    # nmr_detect_peaks(nmr_datase = dataset)
-    # These can work thanks to partial matching of arguments.
-    #
-    # ## Why is partial argument matching a problem?
-    # Partial Arg matching follows the idea that "what you write is *probably* what you want"
-    # A better approach is to use the full argument name.
-    #
-    # ## Can I be warned if I used partial arguments?
-    # Yes, you can use the warnPartialMatchArgs option
-    #
-    # ## Why am I reading this?
-    #
-    # If you enable warnPartialMatchArgs, you will get several warnings when
-    # calling speaq::detectSpecPeaks() because MassSpecWavelet::cwt() (a dependency)
-    # uses partial argument matching by mistake on a seq() function call.
-    # Wrong:
-    #     MassSpecWavelet/R/cwt.R:     psi_xval <- seq(-8, 8, length = 1024)
-    # Right:
-    #     MassSpecWavelet/R/cwt.R:     psi_xval <- seq(-8, 8, length.out = 1024)
-    #
-    # As we don't control the MassSpecWavelet code, we disable warnPartialMatchArgs
-    # in this function if you had it enabled, and we restore it when this function finishes
-    #
-    warnPartialMatchArgs <- getOption("warnPartialMatchArgs")
-    if (isTRUE(warnPartialMatchArgs)) {
-        options(warnPartialMatchArgs = FALSE)
-        on.exit({
-            options(warnPartialMatchArgs = warnPartialMatchArgs)
-        })
-    }
-    
-    prgrs <- show_progress_bar(nrow(nmr_dataset$data_1r) > 5)
-    
+
     data_matrix_to_list <-
         lapply(seq_len(nrow(nmr_dataset$data_1r)),
                function(i)
                    matrix(nmr_dataset$data_1r[i, ], nrow = 1))
-    
-    peakList <- furrr::future_map(data_matrix_to_list,
-                                  function(spec, ...) {
-                                      speaq::detectSpecPeaks(spec, ...)[[1]]
-                                  },
-                                  nDivRange = nDivRange,
-                                  scales = scales,
-                                  baselineThresh = baselineThresh,
-                                  SNR.Th = SNR.Th,
-                                  verbose = FALSE,
-                                  .progress = prgrs,
-                                  .options = furrr::furrr_options(globals = character(0L),
-                                                                   packages = character(0L)))
-    
-    # peakList <- speaq::detectSpecPeaks(
-    #     nmr_dataset$data_1r,
-    #     nDivRange = nDivRange,
-    #     scales = scales,
-    #     baselineThresh = baselineThresh,
-    #     SNR.Th = SNR.Th,
-    #     verbose = FALSE
-    # )
-    
+
+    warn_future_to_biocparallel()
+    peakList <- BiocParallel::bplapply(
+        X = data_matrix_to_list,
+        FUN = function(spec, ...) {
+            speaq::detectSpecPeaks(spec, ...)[[1]]
+        },
+        nDivRange = nDivRange,
+        scales = scales,
+        baselineThresh = baselineThresh,
+        SNR.Th = SNR.Th,
+        verbose = FALSE
+    )
     peakList_to_dataframe(nmr_dataset, peakList)
 }
+
+#' Overview of the peak detection results
+#' 
+#' This plot allows to explore the performance of the peak detection across all the samples, by summarizing
+#' how many peaks are detected on each sample at each chemical shift range.
+#' 
+#' You can use this plot to find differences in the number of detected peaks across your dataset, and then use
+#' [nmr_detect_peaks_plot()] to have a finer look at specific samples and chemical shifts, and assess graphically that the
+#' peak detection results that you have are correct.
+#' 
+#'
+#' @param peak_data The output of [nmr_detect_peaks()]
+#' @param ppm_breaks A numeric vector with the breaks that will be used to count the number of the detected peaks.
+#' @param accepted_only If `peak_data` contains a logical column named `accepted`, only those with `accepted=TRUE` will be counted.
+#'
+#' @return A scatter plot, with samples on one axis and chemical shift bins in the other axis. The size of each dot
+#'   represents the number of peaks found on a sample within a chemical shift range.
+#' @export
+#' @seealso Peak_detection
+#' @family peak detection functions
+nmr_detect_peaks_plot_overview <- function(peak_data, ppm_breaks = pretty(range(peak_data$ppm), n = 20), accepted_only = TRUE) {
+    to_plot <- peak_data
+    if (accepted_only && "accepted" %in% colnames(to_plot)) {
+        to_plot <- to_plot[to_plot$accepted, , drop = FALSE]
+    }
+    to_plot <- dplyr::mutate(to_plot, ppm_grp = cut(.data$ppm, breaks = !!ppm_breaks))
+    to_plot <- to_plot[!is.na(to_plot$ppm_grp),, drop = FALSE]
+    to_plot <- dplyr::group_by(to_plot, .data$NMRExperiment, .data$ppm_grp)
+    to_plot <- dplyr::summarize(to_plot, num_peaks = dplyr::n(), .groups = "drop")
+    to_plot$ppm_grp <- factor(to_plot$ppm_grp, levels = rev(levels(to_plot$ppm_grp)))
+    to_plot$NMRExperiment <- factor(
+        to_plot$NMRExperiment,
+        levels = stringr::str_sort(unique(to_plot$NMRExperiment), numeric = TRUE)
+    )
+    
+    gplt <- ggplot2::ggplot(to_plot) +
+        ggplot2::geom_point(
+            ggplot2::aes(
+                x = .data$ppm_grp,
+                y = .data$NMRExperiment,
+                size = .data$num_peaks
+            )
+        ) +
+        ggplot2::labs(x = "chemical shift bin", y = "NMRExperiment", size = "Number of peaks detected") +
+        ggplot2::theme(legend.position = "bottom", axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+        ggplot2::coord_flip()
+    gplt
+}
+
 
 #' Plot peak detection results
 #'
@@ -167,19 +192,43 @@ nmr_detect_peaks <- function(nmr_dataset,
 #' @inheritParams nmr_detect_peaks
 #' @param peak_data The peak table returned by [nmr_detect_peaks]
 #' @param NMRExperiment a single NMR experiment to plot
+#' @param peak_id A character vector. If given, plot only that peak id.
 #' @param ... Arguments passed to [plot.nmr_dataset_1D] (`chemshift_range`, `...`)
+#' @param accepted_only If `peak_data` contains a logical column named `accepted`, only those with `accepted=TRUE` will be counted. By default, `accepted_only = TRUE`, unless a `peak_id` is given
 #' @export
 #' @return Plot peak detection results
-#' @rdname Peak_detection
 #' 
+#' @seealso Peak_detection nmr_detect_peaks
 #' @family peak detection functions
 #' @family nmr_dataset_1D functions
 nmr_detect_peaks_plot <- function(nmr_dataset,
                                   peak_data,
-                                  NMRExperiment,
+                                  NMRExperiment = NULL,
+                                  peak_id = NULL,
+                                  accepted_only = NULL,
                                   ...) {
-    if (!rlang::is_scalar_character(NMRExperiment)) {
-        stop("NMRExperiment should be a string")
+    
+    if (!rlang::is_scalar_character(NMRExperiment) && is.null(peak_id)) {
+        stop("NMRExperiment should be a string or peak_id should be a peak from one experiment")
+    }
+    peak_data_to_show <- peak_data
+    if (is.null(NMRExperiment)) {
+        peak_data_to_show <- peak_data_to_show[peak_data_to_show$peak_id %in% peak_id,,drop=FALSE]
+        NMRExperiment <- unique(peak_data_to_show$NMRExperiment)
+        if (!rlang::is_scalar_character(NMRExperiment)) {
+            stop(glue::glue(
+                "Peak ids `{peakids}` should belong to only one NMRExperiment ({exper})",
+                peakids = paste0(peak_id, collapse = ", "),
+                exper = paste0(NMRExperiment, collapse = ", ")
+                ))
+        }
+    }
+    if (is.null(accepted_only)) {
+        if (!is.null(peak_id)) {
+            accepted_only <- FALSE
+        } else {
+            accepted_only <- TRUE
+        }
     }
     # If we plot only a subset of the data, we also plot only the required
     # vertical lines:
@@ -189,25 +238,103 @@ nmr_detect_peaks_plot <- function(nmr_dataset,
         chemshift_range[seq_len(2)] <-
             range(chemshift_range[seq_len(2)])
     } else {
-        chemshift_range <- range(peak_data$ppm)
+        chemshift_range <- range(c(peak_data_to_show$ppm, peak_data_to_show$ppm_infl_min-0.01, peak_data_to_show$ppm_infl_max+0.01))
     }
     peak_data_to_show <- dplyr::filter(
-        peak_data,
+        peak_data_to_show,
         .data$NMRExperiment == !!NMRExperiment,
         .data$ppm > chemshift_range[1] &
             .data$ppm < chemshift_range[2]
     )
+    if (accepted_only && "accepted" %in% colnames(peak_data_to_show)) {
+        peak_data_to_show <- peak_data_to_show[peak_data_to_show$accepted,,drop=FALSE]
+    }
+    if (!is.null(peak_id)) {
+        peak_data_to_show <- peak_data_to_show[peak_data_to_show$peak_id %in% peak_id,,drop=FALSE]
+    }
     # Plot:
-    plot(nmr_dataset,
-         NMRExperiment = NMRExperiment,
-         ...,
-         interactive = FALSE) +
+    if ("chemshift_range" %in% names(dots)) {
+        plt <- plot(
+            nmr_dataset,
+            NMRExperiment = NMRExperiment,
+            ...,
+            interactive = FALSE
+        )
+    } else {
+        plt <- plot(
+            nmr_dataset,
+            NMRExperiment = NMRExperiment,
+            ...,
+            chemshift_range = chemshift_range,
+            interactive = FALSE
+        )
+    }
+    plt <- plt +
         ggplot2::geom_vline(
             data = peak_data_to_show,
             ggplot2::aes_string(xintercept = "ppm"),
             color = "black",
             linetype = "dashed"
         )
+    plt
+}
+
+signif_transformer <- function(digits = 3) {
+    force(digits)
+    function(text, envir) {
+        x <- glue::identity_transformer(text, envir)
+        if (is.numeric(x)) {
+            signif(x, digits = digits)
+        } else {
+            x
+        }
+    }
+}
+
+
+#' Plot multiple peaks from a peak list
+#'
+#' @param nmr_dataset The `nmr_dataset_1D` object with the spectra
+#' @param peak_data A data frame, the peak list
+#' @param peak_ids The peak ids to plot
+#' @param caption The caption for each subplot
+#'
+#' @return A plot object
+#' @export
+#'
+nmr_detect_peaks_plot_peaks <- function(
+        nmr_dataset, 
+        peak_data,
+        peak_ids,
+        caption = "{peak_id} (NMRExp. {NMRExperiment}, \u03B3 = {gamma},\narea = {area}, nrmse = {norm_rmse})") {
+    
+    has_cowplot <- requireNamespace("cowplot", quietly = TRUE)
+    has_scales <- requireNamespace("scales", quietly = TRUE)
+    has_gridextra <- requireNamespace("gridExtra", quietly = TRUE)
+    if (!all(has_cowplot, has_scales, has_gridextra)) {
+        miss_pkgs <- c("cowplot", "scales", "gridExtra")[c(has_cowplot, has_scales, has_gridextra)]
+        rlang::abort(message = c(
+            "nmr_detect_peaks_plot_peaks() requires additional packages. Please install them. You may want to use:",
+            glue::glue("install.packages({deparse(miss_pkgs)})", miss_pkgs = miss_pkgs)
+            )
+        )
+    }
+
+    force(nmr_dataset)
+    force(peak_data)
+    plots <- purrr::map(peak_ids, function(peak_id) {
+        peak_metadata <- peak_data[peak_data$peak_id == peak_id, , drop = FALSE]
+        nmr_detect_peaks_plot(nmr_dataset, peak_data, peak_id = peak_id) +
+            ggplot2::labs(caption = glue::glue_data(.x = peak_metadata, caption, .transformer = signif_transformer(3))) +
+            ggplot2::scale_y_continuous(labels = scales::label_number_si()) +
+            ggplot2::theme(legend.position = "none", axis.title = ggplot2::element_blank())
+    })
+    all_plots <- cowplot::plot_grid(plotlist = plots)
+    
+    axis_title_x <- grid::textGrob("Chemical shift (ppm)", gp=grid::gpar(fontsize=14))
+    axis_title_y <- grid::textGrob("Intensity (a.u.)", gp=grid::gpar(fontsize=14), rot=90)
+
+    gridExtra::grid.arrange(gridExtra::arrangeGrob(all_plots, left = axis_title_y, bottom = axis_title_x))
 }
 
 #' Convert a speaq::detectSpecPeaks peak list to an interpretable data frame
@@ -218,13 +345,14 @@ nmr_detect_peaks_plot <- function(nmr_dataset,
 #' @keywords internal
 peakList_to_dataframe <- function(nmr_dataset, peakList) {
     NMRExperiment <- nmr_meta_get_column(nmr_dataset, "NMRExperiment")
-    purrr::imap_dfr(peakList, function(peak_idx,
+    out <- purrr::imap_dfr(peakList, function(peak_idx,
                                        sample_idx,
                                        nmr_dataset,
                                        NMRExperiment) {
         num_of_peaks_in_sample <- length(peak_idx)
         spec <- as.numeric(nmr_dataset$data_1r[sample_idx, ])
         data.frame(
+            peak_id = "",
             NMRExperiment = rep(NMRExperiment[sample_idx], num_of_peaks_in_sample),
             sample_idx = rep(sample_idx, num_of_peaks_in_sample),
             ppm = nmr_dataset$axis[peak_idx],
@@ -233,6 +361,10 @@ peakList_to_dataframe <- function(nmr_dataset, peakList) {
             stringsAsFactors = FALSE
         )
     }, nmr_dataset = nmr_dataset, NMRExperiment = NMRExperiment)
+    num_digits <- nchar(format(nrow(out)))
+    fmt_str <- sprintf("Peak%%0%dd", num_digits)
+    out$peak_id <- sprintf(fmt_str, seq_len(nrow(out)))
+    out
 }
 
 #' Convert the data frame created by [peakList_to_dataframe] back to a peakList
@@ -256,15 +388,10 @@ peak_data_to_peakList <- function(nmr_dataset, peak_data) {
 
 #' Diagnose SNR threshold in peak detection
 #'
-#' @section Parallelization:
-#'
-#' This function accepts parallellization with future strategies.
-#' You can use `plan(multiprocess)` or `plan(sequential)` before calling this function to determine
-#' if it should be parallellized or not.
-#'
 #' @param ds An [nmr_dataset_1D] dataset
 #' @param NMRExperiment A string with the single NMRExperiment used explore the SNR thresholds. If not given, use the first one.
 #' @param SNR_thresholds A numeric vector with the SNR thresholds to explore
+#' @inheritDotParams nmr_detect_peaks
 #'
 #' @return A list with the following elements:
 #'    - `peaks_detected`: A data frame with the columns from the [nmr_detect_peaks] output and an additional column
@@ -277,37 +404,38 @@ peak_data_to_peakList <- function(nmr_dataset, peak_data) {
 #' @family peak detection functions
 #' @family nmr_dataset_1D functions
 #' @export
-#' @rdname Peak_detection
-#'
-nmr_detect_peaks_tune_snr <-
-    function(ds,
-             NMRExperiment = NULL,
-             SNR_thresholds = seq(from = 2, to = 6, by = 0.1)) {
+#' @seealso nmr_detect_peaks
+nmr_detect_peaks_tune_snr <- function(
+    ds,
+    NMRExperiment = NULL,
+    SNR_thresholds = seq(from = 2, to = 6, by = 0.1),
+    ...
+) {
         if (is.null(NMRExperiment)) {
             NMRExperiment <-
                 utils::head(nmr_meta_get_column(ds, column = "NMRExperiment"), n = 1)
         }
         ds1 <- filter(ds, NMRExperiment == !!NMRExperiment)
         names(SNR_thresholds) <- SNR_thresholds
-        
-        peaks_detected <- furrr::future_map_dfr(
-            SNR_thresholds,
-            ~ nmr_detect_peaks(
-                ds1,
-                nDivRange_ppm = 0.03,
-                scales = seq(1, 16, 2),
-                baselineThresh = 0,
-                SNR.Th = .
-            ),
-            #it was baselineThresh = NULL before
-            .id = "SNR_threshold",
-            .options = furrr::furrr_options(globals = character(), packages = character())
+
+        warn_future_to_biocparallel()
+        peaks_detected_list <- BiocParallel::bplapply(
+            X = SNR_thresholds,
+            FUN = function(SNR.Th, nmr_dataset, ...) {
+                nmr_detect_peaks(
+                    nmr_dataset = ds1,
+                    SNR.Th = SNR.Th,
+                    ...
+                )
+            },
+            ...
         )
+        peaks_detected <- dplyr::bind_rows(peaks_detected_list, .id = "SNR_threshold")
         
         peaks_detected$SNR_threshold <-
             as.numeric(peaks_detected$SNR_threshold)
         peaks_per_region <- peaks_detected %>%
-            dplyr::mutate(ppm_region = plyr::round_any(.data$ppm, 0.5)) %>%
+            dplyr::mutate(ppm_region = round(.data$ppm/0.5)*0.5) %>%
             dplyr::group_by(.data$SNR_threshold, .data$ppm_region) %>%
             dplyr::summarize(num_peaks = dplyr::n()) %>%
             dplyr::ungroup()
@@ -384,7 +512,6 @@ nmr_detect_peaks_tune_snr <-
 #' 
 #' @return An [nmr_dataset_1D], with the spectra aligned
 #' @export
-#' @rdname Peak_detection
 #' @family peak alignment functions
 #' @family nmr_dataset_1D functions
 nmr_align <- function(nmr_dataset,
@@ -392,7 +519,7 @@ nmr_align <- function(nmr_dataset,
                       NMRExp_ref = NULL,
                       maxShift_ppm = 0.0015,
                       acceptLostPeak = FALSE) {
-    validate_nmr_dataset_1D(nmr_dataset)
+    nmr_dataset <- validate_nmr_dataset_1D(nmr_dataset)
     maxShift <-
         round(maxShift_ppm / nmr_ppm_resolution(nmr_dataset))
     if (is.null(NMRExp_ref)) {

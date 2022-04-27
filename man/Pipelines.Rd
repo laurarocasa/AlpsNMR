@@ -79,7 +79,7 @@ The first column on each sheet, named the key column, MUST have unique values.
 For instance, a sheet starting with "SubjectID" MUST specify each subject ID
 only once (without repetitions).}
 
-\item{axis}{The ppm axis range and optionally the ppm step}
+\item{axis}{The ppm axis range and optionally the ppm step. Set it to \code{NULL} for autodetection}
 
 \item{exclude}{A list with regions to be removed Typically:
 \code{exclude = list(water = c(4.7, 5.0))}}
@@ -103,10 +103,9 @@ for peaks.}
 \item{scales}{The parameter of peakDetectionCWT function of MassSpecWavelet package, look it up in the original function.}
 
 \item{baselineThresh}{It will remove all peaks under an intensity set by
-baselineThresh. If you set it to 'NULL', nmr_detect_peaks will
-automatically compute an aproximate value considering baseline between 9.5
-and 10.0 ppm (automatically calculation using \code{baselineThresh = NULL} will
-not work if spectra were not interpolated up to 10.0 ppm)}
+\code{baselineThresh}. If you set it to \code{NULL}, \code{nmr_detect_peaks()} will
+automatically estimate the baseline on the region given by the
+\code{range_without_peaks} argument.}
 
 \item{SNR.Th}{The parameter of peakDetectionCWT function of MassSpecWavelet package, look it up in the original function. If you set -1, the function will itself re-compute this value.}
 
@@ -231,24 +230,28 @@ Other outlier detection functions:
 
 Other peak detection functions: 
 \code{\link{nmr_baseline_threshold}()},
+\code{\link{nmr_detect_peaks_plot_overview}()},
+\code{\link{nmr_detect_peaks_plot}()},
+\code{\link{nmr_detect_peaks_tune_snr}()},
+\code{\link{nmr_detect_peaks}()},
 \code{\link{nmr_identify_regions_blood}()},
 \code{\link{nmr_identify_regions_cell}()},
 \code{\link{nmr_identify_regions_urine}()},
 \code{\link{nmr_integrate_regions}()},
-\code{\link{regions_from_peak_table}()},
-\code{\link{validate_nmr_dataset_peak_table}()}
+\code{\link{regions_from_peak_table}()}
 
 Other alignment functions: 
 \code{\link{nmr_align_find_ref}()},
-\code{\link{validate_nmr_dataset_peak_table}()}
+\code{\link{nmr_align}()}
 
 Other peak integration functions: 
 \code{\link{computes_peak_width_ppm}()},
+\code{\link{get_integration_with_metadata}()},
 \code{\link{nmr_identify_regions_blood}()},
 \code{\link{nmr_identify_regions_cell}()},
 \code{\link{nmr_identify_regions_urine}()},
-\code{\link{nmr_integrate_regions}()},
-\code{\link{validate_nmr_dataset_peak_table}()}
+\code{\link{nmr_integrate_peak_positions}()},
+\code{\link{nmr_integrate_regions}()}
 }
 \concept{alignment functions}
 \concept{import/export functions}

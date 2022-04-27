@@ -12,7 +12,7 @@ nmr_interpolate_1D(samples, axis = c(min = 0.2, max = 10, by = 8e-04))
 \arguments{
 \item{samples}{An NMR dataset}
 
-\item{axis}{The ppm axis range and optionally the ppm step}
+\item{axis}{The ppm axis range and optionally the ppm step. Set it to \code{NULL} for autodetection}
 }
 \value{
 Interpolate a set of 1D NMR Spectra
@@ -51,13 +51,19 @@ Other nmr_dataset_1D functions:
 \code{\link{file_lister}()},
 \code{\link{files_to_rDolphin}()},
 \code{\link{format.nmr_dataset_1D}()},
+\code{\link{get_integration_with_metadata}()},
 \code{\link{is.nmr_dataset_1D}()},
 \code{\link{load_and_save_functions}},
 \code{\link{new_nmr_dataset_1D}()},
 \code{\link{nmr_align_find_ref}()},
+\code{\link{nmr_align}()},
 \code{\link{nmr_baseline_removal}()},
 \code{\link{nmr_baseline_threshold}()},
+\code{\link{nmr_detect_peaks_plot}()},
+\code{\link{nmr_detect_peaks_tune_snr}()},
+\code{\link{nmr_detect_peaks}()},
 \code{\link{nmr_exclude_region}()},
+\code{\link{nmr_integrate_peak_positions}()},
 \code{\link{nmr_integrate_regions}()},
 \code{\link{nmr_meta_add}()},
 \code{\link{nmr_meta_export}()},
@@ -77,7 +83,6 @@ Other nmr_dataset_1D functions:
 \code{\link{rdCV_PLS_RF}()},
 \code{\link{save_files_to_rDolphin}()},
 \code{\link{to_ChemoSpec}()},
-\code{\link{validate_nmr_dataset_peak_table}()},
 \code{\link{validate_nmr_dataset}()}
 }
 \concept{nmr_dataset functions}

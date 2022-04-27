@@ -1,7 +1,7 @@
 Package: AlpsNMR
 Type: Package
 Title: Automated spectraL Processing System for NMR
-Version: 3.3.4
+Version: 3.5.1
 Encoding: UTF-8
 Authors@R: c(
     person(given = "Ivan",
@@ -48,50 +48,51 @@ Description: Reads Bruker NMR data directories both zipped and unzipped.
  Basic reading of 1D ACD/Labs exported JDX samples is also available.
 License: MIT + file LICENSE
 LazyData: FALSE
-Depends: R (>= 4.0), dplyr (>= 0.7.5), future (>= 1.10.0), magrittr (>= 1.5)
+Depends: R (>= 4.1), dplyr (>= 0.7.5), future (>= 1.10.0), magrittr (>= 1.5)
 Imports:
  utils,
  graphics,
  stats,
  grDevices,
  signal (>= 0.7-6),
- assertthat (>= 0.2.0),
  rlang (>= 0.3.0.1),
  stringr (>= 1.3.1),
  tibble(>= 1.3.4),
  tidyr (>= 1.0.0),
  readxl (>= 1.1.0),
- plyr (>= 1.8.4),
  purrr (>= 0.2.5),
  glue (>= 1.2.0),
  reshape2 (>= 1.4.3),
- GGally (>= 1.4.0),
  mixOmics (>= 6.3.2),
  matrixStats (>= 0.54.0),
- writexl (>= 1.0),
  fs (>= 1.2.6),
  rmarkdown (>= 1.10),
  speaq (>= 2.4.0),
  htmltools (>= 0.3.6),
- ggrepel (>= 0.8.0),
  pcaPP (>= 1.9-73),
- furrr (>= 0.1.0),
  ggplot2 (>= 3.1.0),
  baseline (>= 1.2-1),
- zip (>= 2.0.4),
- tidyselect (>= 0.2.5),
  vctrs (>= 0.3.0),
- BiocParallel,
- SummarizedExperiment,
- S4Vectors
+ BiocParallel
 Suggests:
     DT (>= 0.5),
     testthat (>= 2.0.0),
     plotly (>= 4.7.1),
     ChemoSpec,
-    knitr
+    knitr,
+    zip (>= 2.0.4),
+    GGally (>= 1.4.0),
+    ggrepel (>= 0.8.0),
+    cowplot,
+    gridExtra,
+    scales,
+    writexl (>= 1.0),
+    curl,
+    progressr,
+    SummarizedExperiment,
+    S4Vectors
 biocViews: Software, Preprocessing, Visualization, Classification,
            Cheminformatics, Metabolomics, DataImport
-RoxygenNote: 7.1.1
+RoxygenNote: 7.1.2
 Roxygen: list(markdown = TRUE)
 VignetteBuilder: knitr

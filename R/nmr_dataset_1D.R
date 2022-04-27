@@ -37,28 +37,57 @@ NULL
 #' 
 validate_nmr_dataset_1D <- function(nmr_dataset_1D) {
     validate_nmr_dataset_family(nmr_dataset_1D)
-    assert_that(inherits(nmr_dataset_1D, "nmr_dataset_1D"),
-                            msg = "Not an nmr_dataset_1D")
+    abort_if_not(
+        inherits(nmr_dataset_1D, "nmr_dataset_1D"),
+        message = "Not an nmr_dataset_1D"
+    )
     
-    assert_that("axis" %in% names(nmr_dataset_1D),
-                            msg = "nmr_dataset_1D must have a ppm axis")
-    assert_that("data_1r" %in% names(nmr_dataset_1D),
-                            msg = "nmr_dataset_1D must have a data_1r matrix")
+    abort_if_not(
+        "axis" %in% names(nmr_dataset_1D),
+        message = "nmr_dataset_1D must have a ppm axis"
+    )
+    abort_if_not(
+        "data_1r" %in% names(nmr_dataset_1D),
+        message = "nmr_dataset_1D must have a data_1r matrix"
+    )
     
     ppm_axis <- nmr_dataset_1D[["axis"]]
     data_1r <- nmr_dataset_1D[["data_1r"]]
-    assert_that(is.vector(ppm_axis) && is.numeric(ppm_axis),
-                            msg = "axis must be a numeric vector")
-    assert_that(is.matrix(data_1r) && is.numeric(data_1r),
-                            msg = "data_1r must be a numeric matrix")
+    abort_if_not(
+        is.vector(ppm_axis) && is.numeric(ppm_axis),
+        message = "axis must be a numeric vector"
+    )
+    abort_if_not(
+        is.matrix(data_1r) && is.numeric(data_1r),
+        message = "data_1r must be a numeric matrix"
+    )
     
-    assert_that(length(ppm_axis) == ncol(data_1r),
-                            msg = "ppm axis does not have a length equal to ncol(data_1r)")
+    abort_if_not(
+        length(ppm_axis) == ncol(data_1r),
+        message = "ppm axis does not have a length equal to ncol(data_1r)"
+    )
     num_samples <- nrow(data_1r)
     
-    assert_that(num_samples == nmr_dataset_1D[["num_samples"]],
-                            msg = "The num_samples value does not match nrow(data_1r)")
+    abort_if_not(
+        num_samples == nmr_dataset_1D[["num_samples"]],
+        message = "The num_samples value does not match nrow(data_1r)"
+    )
     
+    if (!"excluded_regions" %in% names(nmr_dataset_1D)) {
+        rlang::warn(
+            message = c(
+                'The dataset should have a "excluded_regions" element with the excluded regions.',
+                "i" = paste0(
+                    'If you saved and restored a dataset from a previous AlpsNMR version, and you ',
+                    'know the regions you excluded, you can set it manually: if `x` is your ',
+                    'dataset, just use:\n  `x[["excluded_regions"]] <- list(water = c(4.7, 5.0))`\n',
+                    '  where the list can be just empty or whatever you passed to nmr_exclude_regions().'
+                ),
+                "i" = "Otherwise, AlpsNMR will assume there are no excluded regions on some peak detection stages."
+            )
+        )
+        nmr_dataset_1D[["excluded_regions"]] <- list()
+    }
     nmr_dataset_1D
 }
 
@@ -69,7 +98,6 @@ validate_nmr_dataset_1D <- function(nmr_dataset_1D) {
 #' @param data_1r A numeric matrix with one NMR spectrum on each row
 #' @param metadata A list of data frames with at least the `NMRExperiment` column
 #'
-#' @importFrom assertthat assert_that
 #' @importFrom glue glue
 #' @family class helper functions
 #' @family nmr_dataset_1D functions
@@ -96,9 +124,9 @@ new_nmr_dataset_1D <- function(ppm_axis, data_1r, metadata) {
     samples[["data_1r"]] <- data_1r
     samples[["axis"]] <- ppm_axis
     samples[["num_samples"]] <- nrow(data_1r)
+    samples[["excluded_regions"]] <- list()
     class(samples) <- c("nmr_dataset_1D", "nmr_dataset_family")
     validate_nmr_dataset_1D(samples)
-    samples
 }
 
 #' Object is of [nmr_dataset_1D] class
@@ -168,7 +196,6 @@ format.nmr_dataset_1D <- function(x, ...) {
     output[["data_1r"]] <- output[["data_1r"]][i, , drop = FALSE]
     output$num_samples <- nrow(output$metadata[[1]])
     validate_nmr_dataset_1D(output)
-    return(output)
 }
 
 #' Export 1D NMR data to a CSV file
@@ -176,7 +203,6 @@ format.nmr_dataset_1D <- function(x, ...) {
 #' @param nmr_dataset An [nmr_dataset_1D] object
 #' @param filename The csv filename
 #' 
-#' @import SummarizedExperiment
 #' @return The nmr_dataset object (unmodified)
 #' @export 
 #' @examples 
@@ -186,7 +212,10 @@ format.nmr_dataset_1D <- function(x, ...) {
 #' #nmr_export_data_1r(dataset_1D, "exported_nmr_dataset")
 nmr_export_data_1r <- function(nmr_dataset, filename) {
     # FIXME: remove me (nmr_data() covers for this)
-    assert_that(is.nmr_dataset_1D(nmr_dataset), msg = "An nmr_dataset_1D should be given")
+    abort_if_not(
+        is.nmr_dataset_1D(nmr_dataset),
+        message = "An nmr_dataset_1D should be given"
+    )
     data_1r <- nmr_data(nmr_dataset)
     utils::write.csv(data_1r, file = filename, row.names = FALSE)
     nmr_dataset
@@ -205,7 +234,13 @@ nmr_export_data_1r <- function(nmr_dataset, filename) {
 #' dataset_1D <- nmr_interpolate_1D(dataset, axis = c(min = -0.5, max = 10, by = 2.3E-4))
 #' se <- nmr_data_1r_to_SummarizedExperiment(dataset_1D)
 nmr_data_1r_to_SummarizedExperiment <- function(nmr_dataset) {
-    assert_that(is.nmr_dataset_1D(nmr_dataset), msg = "An nmr_dataset_1D should be given")
+    if (!requireNamespace("SummarizedExperiment", quietly = TRUE)) {
+        rlang::abort("Please install SummarizedExperiment.")
+    }
+    abort_if_not(
+        is.nmr_dataset_1D(nmr_dataset), 
+        message = "An nmr_dataset_1D should be given"
+    )
     data_1r <- nmr_data(nmr_dataset)
     # SummarizedExperiment work trasposed
     SummarizedExperiment::SummarizedExperiment(assays=list(data_1r=data_1r),
@@ -226,6 +261,13 @@ nmr_data_1r_to_SummarizedExperiment <- function(nmr_dataset) {
 #' se <- nmr_data_1r_to_SummarizedExperiment(dataset_1D)
 #' dataset_1D <- SummarizedExperiment_to_nmr_data_1r(se)
 SummarizedExperiment_to_nmr_data_1r <- function(se) {
+    if (!requireNamespace("SummarizedExperiment", quietly = TRUE)) {
+        rlang::abort("Please install the SummarizedExperiment package")
+    }
+    if (!requireNamespace("S4Vectors", quietly = TRUE)) {
+        rlang::abort("Please install the S4Vectors package")
+    }
+    
     meta <- S4Vectors::metadata(se)
     
     col_names <- names(meta)

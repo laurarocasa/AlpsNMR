@@ -234,24 +234,28 @@ split_build_perform <- function(train_test_subset,
 #' @noRd
 do_cv <- function(dataset, y_column, identity_column, train_evaluate_model,
                   train_test_subsets, train_evaluate_model_args_iter = NULL, ...) {
-    if (show_progress_bar(length(train_test_subsets) > 5)) {
-        prgrs <- TRUE
-    } else {
-        prgrs <- FALSE
-    }
 
-    output <- furrr::future_pmap(
-        c(list(train_test_subset = train_test_subsets),
-            train_evaluate_model_args_iter),
-        split_build_perform,
-        dataset = dataset,
-        y_column = y_column,
-        identity_column = identity_column,
-        train_evaluate_model = train_evaluate_model,
-        ...,
-        .progress = prgrs,
-        .options = furrr::furrr_options(globals = character(0),
-                                         packages = character(0)))
+    warn_future_to_biocparallel()
+    output <- do.call(
+        what = BiocParallel::bpmapply,
+        args = c(
+            list(
+                FUN = split_build_perform,
+                train_test_subset = train_test_subsets
+            ),
+            train_evaluate_model_args_iter,
+            list(
+                MoreArgs = list(
+                    dataset = dataset,
+                    y_column = y_column,
+                    identity_column = identity_column,
+                    train_evaluate_model = train_evaluate_model,
+                    ...
+                ),
+                SIMPLIFY = FALSE
+            )
+        )
+    )
     names(output) <- names(train_test_subsets)
     output
 }
@@ -381,14 +385,16 @@ nmr_data_analysis <- function(dataset,
     # Compute the outer cv models
     outer_cv_results <- do.call(
         what = do_cv,
-        args = c(list(dataset = dataset,
-                      y_column = y_column,
-                      identity_column = identity_column,
-                      train_evaluate_model = train_evaluate_model,
-                      train_test_subsets = train_test_subsets_outer,
-                      train_evaluate_model_args_iter = inner_cv_results_digested$train_evaluate_model_args
-                      ),
-        train_evaluate_model_params_outer
+        args = c(
+            list(
+                dataset = dataset,
+                y_column = y_column,
+                identity_column = identity_column,
+                train_evaluate_model = train_evaluate_model,
+                train_test_subsets = train_test_subsets_outer,
+                train_evaluate_model_args_iter = inner_cv_results_digested$train_evaluate_model_args
+            ),
+            train_evaluate_model_params_outer
         )
     )
     
@@ -828,16 +834,6 @@ bp_kfold_VIP_analysis <- function(dataset,
         k_fold_index[[i]] <- seq_len(length(y_all))[-k_fold_split[[i]]]
     }
     
-    # Paralellization
-    chk <- Sys.getenv("_R_CHECK_LIMIT_CORES_", "")
-    if (nzchar(chk) && chk == "TRUE") {
-        # use 2 cores in CRAN/Travis/AppVeyor
-        numcores <- 2L
-    } else {
-        # use all cores in devtools::test()
-        numcores <- k
-    }
-    snow <- BiocParallel::SnowParam(workers = numcores, type = "SOCK")
     results <- BiocParallel::bplapply(
         k_fold_index, function(index, dataset = dataset, y_column = y_column,
                                ncomp = ncomp, nbootstrap = nbootstrap) {
@@ -847,33 +843,9 @@ bp_kfold_VIP_analysis <- function(dataset,
             y_column = y_column,
             ncomp = ncomp,
             nbootstrap = nbootstrap
-        )}, BPPARAM = snow, dataset = dataset, y_column = y_column, 
+        )}, dataset = dataset, y_column = y_column, 
         ncomp = ncomp, nbootstrap = nbootstrap)
 
-    # # Paralellization
-    # chk <- Sys.getenv("_R_CHECK_LIMIT_CORES_", "")
-    # 
-    # if (nzchar(chk) && chk == "TRUE") {
-    #     # use 2 cores in CRAN/Travis/AppVeyor
-    #     numcores <- 2L
-    # } else {
-    #     # use all cores in devtools::test()
-    #     numcores <- parallel::detectCores()
-    # }
-    # if(numcores > k){numcores <- k}
-    # cl <- parallel::makeCluster(numcores)
-    # parallel::clusterExport(cl, c("dataset", "y_column", "ncomp", "nbootstrap"), envir=environment())
-    # results <- parallel::parLapply(cl, k_fold_index, function(index) {
-    #     bp_VIP_analysis(
-    #         dataset,
-    #         index,
-    #         y_column = y_column,
-    #         ncomp = ncomp,
-    #         nbootstrap = nbootstrap
-    #     )
-    # })
-    # parallel::stopCluster(cl)
-    
     # Mean of the vips of the different folds for the plot
     means <- purrr::map(results, "pls_vip_means")
     #means <- sapply(results, "[", "pls_vip_means")

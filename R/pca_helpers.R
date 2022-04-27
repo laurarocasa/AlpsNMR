@@ -72,17 +72,19 @@ nmr_pca_build_model.nmr_dataset_1D <- function(nmr_dataset,
 #' @family PCA related functions
 #' @name nmr_pca_plots
 #' @return Plot of PCA
-NULL
-
-#' @rdname nmr_pca_plots
-#' @export
 #' @examples
 #' dir_to_demo_dataset <- system.file("dataset-demo", package = "AlpsNMR")
 #' dataset <- nmr_read_samples_dir(dir_to_demo_dataset)
 #' dataset_1D <- nmr_interpolate_1D(dataset, axis = c(min = -0.5, max = 10, by = 2.3E-4))
 #' model <- nmr_pca_build_model(dataset_1D)
 #' nmr_pca_plot_variance(model)
+#' nmr_pca_scoreplot(dataset_1D, model)
+#' nmr_pca_loadingplot(model, 1)
 #'
+NULL
+
+#' @rdname nmr_pca_plots
+#' @export
 nmr_pca_plot_variance <- function(pca_model) {
     cum_var_percent <-
         100 * cumsum(pca_model$sdev ^ 2 / pca_model$var.tot)
@@ -95,13 +97,6 @@ nmr_pca_plot_variance <- function(pca_model) {
 
 #' @rdname nmr_pca_plots
 #' @export
-#' @examples
-#' dir_to_demo_dataset <- system.file("dataset-demo", package = "AlpsNMR")
-#' dataset <- nmr_read_samples_dir(dir_to_demo_dataset)
-#' dataset_1D <- nmr_interpolate_1D(dataset, axis = c(min = -0.5, max = 10, by = 2.3E-4))
-#' model <- nmr_pca_build_model(dataset_1D)
-#' nmr_pca_scoreplot(dataset_1D, model)
-#'
 nmr_pca_scoreplot <- function(nmr_dataset,
                               pca_model,
                               comp = seq_len(2), ...) {
@@ -135,6 +130,9 @@ nmr_pca_scoreplot <- function(nmr_dataset,
             ggplot2::xlab(axis_labels[xy[1]]) +
             ggplot2::ylab(axis_labels[xy[2]])
     } else {
+        if (!requireNamespace("GGally", quietly = TRUE)) {
+            rlang::abort("Please install the GGally package to plot more than two components at once")
+        }
         gplt <- GGally::ggpairs(
             data = scores,
             mapping = ggplot2::aes(...),
@@ -149,13 +147,6 @@ nmr_pca_scoreplot <- function(nmr_dataset,
 
 #' @rdname nmr_pca_plots
 #' @export
-#' @examples
-#' dir_to_demo_dataset <- system.file("dataset-demo", package = "AlpsNMR")
-#' dataset <- nmr_read_samples_dir(dir_to_demo_dataset)
-#' dataset_1D <- nmr_interpolate_1D(dataset, axis = c(min = -0.5, max = 10, by = 2.3E-4))
-#' model <- nmr_pca_build_model(dataset_1D)
-#' nmr_pca_loadingplot(model, 1)
-#'
 nmr_pca_loadingplot <- function(pca_model, comp) {
     ppm_axis <- attr(pca_model, "nmr_data_axis")
     loadings <-
@@ -208,7 +199,7 @@ nmr_pca_outliers <- function(nmr_dataset,
                              pca_model,
                              ncomp = NULL,
                              quantile_critical = 0.975) {
-    validate_nmr_dataset_1D(nmr_dataset)
+    nmr_dataset <- validate_nmr_dataset_1D(nmr_dataset)
     
     if (is.null(ncomp)) {
         cum_var_percent <-
@@ -291,7 +282,7 @@ nmr_pca_outliers <- function(nmr_dataset,
 #' outliers_info <- nmr_pca_outliers_robust(dataset_1D)
 #'
 nmr_pca_outliers_robust <- function(nmr_dataset, ncomp = 5) {
-    validate_nmr_dataset_1D(nmr_dataset)
+    nmr_dataset <- validate_nmr_dataset_1D(nmr_dataset)
     
     Xprep_rob <- scale(
         nmr_dataset$data_1r,
@@ -375,6 +366,14 @@ nmr_pca_outliers_robust <- function(nmr_dataset, ncomp = 5) {
 #' #nmr_pca_outliers_plot(dataset_1D, outliers_info)
 #' 
 nmr_pca_outliers_plot <- function(nmr_dataset, pca_outliers, ...) {
+    has_ggrepel <- requireNamespace("ggrepel", quietly = TRUE)
+    if (!has_ggrepel) {
+        rlang::warn(
+            message = "Please install ggrepel to avoid overlap of text labels in the plot",
+            .frequency = "once", 
+            .frequency_id = "install_ggrepel"
+        )
+    }
     outlier_info <- pca_outliers[["outlier_info"]]
     tscore_crit <- pca_outliers[["Tscore_critical"]]
     qres_crit <- pca_outliers[["QResidual_critical"]]
@@ -390,12 +389,19 @@ nmr_pca_outliers_plot <- function(nmr_dataset, pca_outliers, ...) {
         .data$Tscores > tscore_crit | .data$QResiduals > qres_crit
     )
     
-    ggplot2::ggplot(
+    gplt <- ggplot2::ggplot(
         pca_outliers_with_meta,
         ggplot2::aes_string(x = "Tscores", y = "QResiduals", label = "NMRExperiment")
     ) +
-        ggplot2::geom_point(ggplot2::aes_string(...)) +
-        ggrepel::geom_text_repel(data = pca_outliers_with_meta_only_out) +
+        ggplot2::geom_point(ggplot2::aes_string(...))
+    if (has_ggrepel) {
+        gplt <- gplt +
+            ggrepel::geom_text_repel(data = pca_outliers_with_meta_only_out)
+    } else {
+        gplt <- gplt +
+            ggplot2::geom_text(data = pca_outliers_with_meta_only_out)
+    }
+    gplt <- gplt +
         ggplot2::geom_vline(xintercept = tscore_crit,
                             colour = "red",
                             linetype = "dashed") +
@@ -406,6 +412,7 @@ nmr_pca_outliers_plot <- function(nmr_dataset, pca_outliers, ...) {
             list(ncomp = ncomp),
             "PCA Residuals and Score distance ({ncomp} components)"
         ))
+    gplt
 }
 
 #' Exclude outliers

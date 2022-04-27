@@ -26,6 +26,17 @@ plot.nmr_dataset_1D <- function(x,
                                 quantile_plot = NULL,
                                 quantile_colors = NULL,
                                 ...) {
+    if (interactive) {
+        if (!requireNamespace("plotly", quietly = TRUE)) {
+            rlang::abort(
+                message = c(
+                    "plot.nmr_dataset_1D() requires the plotly package to create interactive plots. Please install it.",
+                    "i" = 'You may want to use: install.packages("plotly")',
+                    "i" = "Otherwise, you can set interactive=FALSE."
+                )
+            )
+        }
+    }
     if (is.null(chemshift_range)) {
         chemshift_range <- range(x$axis)
     } else if (length(chemshift_range) == 2) {
@@ -125,16 +136,10 @@ plot.nmr_dataset_1D <- function(x,
     
     gplt <- gplt +
         ggplot2::geom_line(do.call(ggplot2::aes_string, all_aes)) +
-        ggplot2::scale_x_reverse(name = "Chemical Shift (ppm)", limits = rev(chemshift_range[seq_len(2)])) +
-        ggplot2::scale_y_continuous(name = "Intensity (a.u.)")
+        ggplot2::labs(x = "Chemical Shift (ppm)", y = "Intensity (a.u.)") +
+        ggplot2::scale_x_reverse(limits = rev(chemshift_range[seq_len(2)]))
     
     if (interactive) {
-        if (!requireNamespace("plotly", quietly = TRUE)) {
-            stop(
-                "plotly needed for this plot to work. Please install it or use `interactive = FALSE`.",
-                call. = FALSE
-            )
-        }
         output <- plotly::ggplotly(gplt)
     } else {
         output <- gplt
@@ -235,6 +240,7 @@ plot_webgl <- function(nmr_dataset, html_filename, ...) {
 #' @family plotting functions
 #' @param plt A plot created with plotly or ggplot2
 #' @param html_filename The file name where the plot will be saved
+#' @param overwrite Overwrite the lib/ directory (use `NULL` to prompt the user)
 #'
 #' @return The html_filename
 #' @export
@@ -245,17 +251,23 @@ plot_webgl <- function(nmr_dataset, html_filename, ...) {
 #' # plot <- plot(dataset_1D)
 #' # html_plot_interactive <- plot_interactive(plot, "html_plot_interactive.html")
 #' 
-plot_interactive <- function(plt, html_filename) {
+plot_interactive <- function(plt, html_filename, overwrite = NULL) {
     #Check if lib folder exists
-    libdir <- paste(getwd(), "/lib", sep = "")
-    if(dir.exists(libdir)){
-        # warning user before some contents of lib folder could be destroyed
-        message("warning: lib folder alrready exists, the function plot_interactive will")
-        message("override it. Do yo want to continue? (y/n): ")
-        response <- scan("stdin", character(), n=1)
-        if(response == 'n'){
-            stop("Canceling plot_interactive")
+    basedir <- dirname(html_filename)
+    libdir <- file.path(basedir, "lib")
+    libdir_exists <- dir.exists(libdir)
+    if (is.null(overwrite) && libdir_exists) {
+        if (interactive()) {
+            # warning user before some contents of lib folder could be destroyed
+            rlang::inform("{libdir} folder already exists, plot_interactive will replace it. Continue? [y/n]:")
+            response <- scan("stdin", character(), n=1)
+            overwrite <- response %in% c("y", "Y")
+        } else {
+            overwrite <- FALSE
         }
+    }
+    if (libdir_exists && isFALSE(overwrite)) {
+        rlang::abort(message = c("plot_interactive aborted", "x" = "{libdir} folder already exists, use overwrite=TRUE"))
     }
     suppressMessages(utils::capture.output({
         htmltools::save_html(
