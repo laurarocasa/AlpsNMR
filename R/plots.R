@@ -27,15 +27,7 @@ plot.nmr_dataset_1D <- function(x,
                                 quantile_colors = NULL,
                                 ...) {
     if (interactive) {
-        if (!requireNamespace("plotly", quietly = TRUE)) {
-            rlang::abort(
-                message = c(
-                    "plot.nmr_dataset_1D() requires the plotly package to create interactive plots. Please install it.",
-                    "i" = 'You may want to use: install.packages("plotly")',
-                    "i" = "Otherwise, you can set interactive=FALSE."
-                )
-            )
-        }
+        require_pkgs("plotly", msgs = c("i" = "Otherwise, you can set interactive=FALSE."))
     }
     if (is.null(chemshift_range)) {
         chemshift_range <- range(x$axis)
@@ -137,7 +129,9 @@ plot.nmr_dataset_1D <- function(x,
     gplt <- gplt +
         ggplot2::geom_line(do.call(ggplot2::aes_string, all_aes)) +
         ggplot2::labs(x = "Chemical Shift (ppm)", y = "Intensity (a.u.)") +
-        ggplot2::scale_x_reverse(limits = rev(chemshift_range[seq_len(2)]))
+        ggplot2::scale_x_reverse(limits = rev(chemshift_range[seq_len(2)])) +
+        ggplot2::scale_y_continuous(labels = scales::label_number(scale_cut = scales::cut_si("")))
+
     
     if (interactive) {
         output <- plotly::ggplotly(gplt)

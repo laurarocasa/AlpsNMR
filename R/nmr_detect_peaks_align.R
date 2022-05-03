@@ -60,6 +60,11 @@ NULL
 #' [speaq::detectSpecPeaks]. `detectSpecPeaks` divides the whole spectra into
 #' smaller segments and uses [MassSpecWavelet::peakDetectionCWT] for peak
 #' detection.
+#' 
+#' Afterwards, the peak apex and the peak inflection points are used to efficiently
+#' adjust a lorentzian to each peak, and compute the peak area and width, as well as
+#' the error of the fit. These peak features can be used afterwards to reject false
+#' detections.
 #'
 #' @family peak detection functions
 #' @family nmr_dataset_1D functions
@@ -67,10 +72,11 @@ NULL
 #' @param nmr_dataset An [nmr_dataset_1D].
 #' @param nDivRange_ppm Segment size, in ppms, to divide the spectra and search
 #'     for peaks.
-#' @param baselineThresh It will remove all peaks under an intensity set by
-#'     `baselineThresh`. If you set it to `NULL`, `nmr_detect_peaks()` will
-#'     automatically estimate the baseline on the region given by the
-#'     `range_without_peaks` argument.
+#' @param baselineThresh All peaks with intensities below the thresholds are excluded. Either:
+#'   - A numeric vector of length the number of samples. Each number is a threshold for that sample
+#'   - A single number. All samples use this number as baseline threshold.
+#'   - A function, that takes the `nmr_dataset` and `range_without_peaks` and returns a numeric vector with the thresholds.
+#'   - `NULL`. If that's the case, a default function is used ([nmr_baseline_threshold()])
 #' @inheritParams speaq::detectSpecPeaks
 #' @param range_without_peaks A numeric vector of length two with a region without peaks, only used when `baselineThresh = NULL`
 #' @param verbose Logical (`TRUE` or `FALSE`). Show informational messages, such as the estimated baseline
@@ -92,11 +98,14 @@ nmr_detect_peaks <- function(nmr_dataset,
     nDivRange <- round(nDivRange_ppm / ppm_resolution)
     
     # Computes the Baseline Threshold
+    baselineThresh_fun <- NULL
     if (is.null(baselineThresh)) {
-        baselineThresh <- nmr_baseline_threshold(
-            nmr_dataset,
-            range_without_peaks = range_without_peaks
-        )
+        baselineThresh_fun <- nmr_baseline_threshold
+    } else if (rlang::is_function(baselineThresh)) {
+        baselineThresh_fun <- baselineThresh
+    }
+    if (!is.null(baselineThresh_fun)) {
+        baselineThresh <- rlang::exec(baselineThresh_fun, nmr_dataset, range_without_peaks = range_without_peaks)
         if (isTRUE(verbose)) {
             rlang::inform(
                 message = c(
@@ -116,6 +125,13 @@ nmr_detect_peaks <- function(nmr_dataset,
             )
         }
     }
+    
+    if (!is.numeric(baselineThresh)) {
+        rlang::abort(glue::glue("The baseline threshold is not numeric: {baselineThresh}"))
+    }
+    if (length(baselineThresh) == 1) {
+        baselineThresh <- rep(baselineThresh, times = nmr_dataset$num_samples)
+    }
 
     data_matrix_to_list <-
         lapply(seq_len(nrow(nmr_dataset$data_1r)),
@@ -123,18 +139,26 @@ nmr_detect_peaks <- function(nmr_dataset,
                    matrix(nmr_dataset$data_1r[i, ], nrow = 1))
 
     warn_future_to_biocparallel()
-    peakList <- BiocParallel::bplapply(
-        X = data_matrix_to_list,
-        FUN = function(spec, ...) {
-            speaq::detectSpecPeaks(spec, ...)[[1]]
+    peakList <- BiocParallel::bpmapply(
+        FUN = function(spec, thresh, ...) {
+            speaq::detectSpecPeaks(
+                spec,
+                baselineThresh = thresh,
+                ...
+            )[[1]]
         },
-        nDivRange = nDivRange,
-        scales = scales,
-        baselineThresh = baselineThresh,
-        SNR.Th = SNR.Th,
-        verbose = FALSE
+        data_matrix_to_list,
+        baselineThresh,
+        MoreArgs = list(
+            nDivRange = nDivRange,
+            scales = scales,
+            SNR.Th = SNR.Th,
+            verbose = FALSE
+        ),
+        SIMPLIFY = FALSE
     )
-    peakList_to_dataframe(nmr_dataset, peakList)
+    peak_data <- peakList_to_dataframe(nmr_dataset, peakList)
+    peaklist_fit_lorentzians(peak_data, nmr_dataset)
 }
 
 #' Overview of the peak detection results
@@ -235,11 +259,11 @@ nmr_detect_peaks_plot <- function(nmr_dataset,
     dots <- list(...)
     if ("chemshift_range" %in% names(dots)) {
         chemshift_range <- dots[["chemshift_range"]]
-        chemshift_range[seq_len(2)] <-
-            range(chemshift_range[seq_len(2)])
+        chemshift_range[seq_len(2)] <- range(chemshift_range[seq_len(2)])
     } else {
         chemshift_range <- range(c(peak_data_to_show$ppm, peak_data_to_show$ppm_infl_min-0.01, peak_data_to_show$ppm_infl_max+0.01))
     }
+    dots[["chemshift_range"]] <- chemshift_range
     peak_data_to_show <- dplyr::filter(
         peak_data_to_show,
         .data$NMRExperiment == !!NMRExperiment,
@@ -252,23 +276,15 @@ nmr_detect_peaks_plot <- function(nmr_dataset,
     if (!is.null(peak_id)) {
         peak_data_to_show <- peak_data_to_show[peak_data_to_show$peak_id %in% peak_id,,drop=FALSE]
     }
-    # Plot:
-    if ("chemshift_range" %in% names(dots)) {
-        plt <- plot(
-            nmr_dataset,
-            NMRExperiment = NMRExperiment,
-            ...,
-            interactive = FALSE
-        )
-    } else {
-        plt <- plot(
-            nmr_dataset,
-            NMRExperiment = NMRExperiment,
-            ...,
-            chemshift_range = chemshift_range,
-            interactive = FALSE
-        )
-    }
+    # We can't make it interactive here
+    interactive <- "interactive" %in% names(dots) && dots[["interactive"]]
+    dots[["interactive"]] <- FALSE
+    plt <- rlang::exec(
+        plot,
+        nmr_dataset,
+        NMRExperiment = NMRExperiment,
+        !!!dots
+    )
     plt <- plt +
         ggplot2::geom_vline(
             data = peak_data_to_show,
@@ -276,7 +292,12 @@ nmr_detect_peaks_plot <- function(nmr_dataset,
             color = "black",
             linetype = "dashed"
         )
-    plt
+
+    if (interactive) {
+        plotly::ggplotly(plt)
+    } else {
+        plt
+    }
 }
 
 signif_transformer <- function(digits = 3) {
@@ -306,27 +327,19 @@ nmr_detect_peaks_plot_peaks <- function(
         nmr_dataset, 
         peak_data,
         peak_ids,
-        caption = "{peak_id} (NMRExp. {NMRExperiment}, \u03B3 = {gamma},\narea = {area}, nrmse = {norm_rmse})") {
+        caption = paste("{peak_id}", "(NMRExp. {NMRExperiment},", "\u03B3 = {gamma},",
+                        "\narea = {area},", "nrmse = {norm_rmse})")) {
     
-    has_cowplot <- requireNamespace("cowplot", quietly = TRUE)
-    has_scales <- requireNamespace("scales", quietly = TRUE)
-    has_gridextra <- requireNamespace("gridExtra", quietly = TRUE)
-    if (!all(has_cowplot, has_scales, has_gridextra)) {
-        miss_pkgs <- c("cowplot", "scales", "gridExtra")[c(has_cowplot, has_scales, has_gridextra)]
-        rlang::abort(message = c(
-            "nmr_detect_peaks_plot_peaks() requires additional packages. Please install them. You may want to use:",
-            glue::glue("install.packages({deparse(miss_pkgs)})", miss_pkgs = miss_pkgs)
-            )
-        )
-    }
-
+    require_pkgs(pkg = c("cowplot", "gridExtra"))
     force(nmr_dataset)
     force(peak_data)
+    # Workaround https://github.com/r-lib/roxygen2/issues/1342
+    caption <- gsub("NMRExp. ", "NMRExp.\u00A0", caption)
+    caption <- gsub(" = ", "\u00a0=\u00a0", caption)
     plots <- purrr::map(peak_ids, function(peak_id) {
         peak_metadata <- peak_data[peak_data$peak_id == peak_id, , drop = FALSE]
         nmr_detect_peaks_plot(nmr_dataset, peak_data, peak_id = peak_id) +
             ggplot2::labs(caption = glue::glue_data(.x = peak_metadata, caption, .transformer = signif_transformer(3))) +
-            ggplot2::scale_y_continuous(labels = scales::label_number_si()) +
             ggplot2::theme(legend.position = "none", axis.title = ggplot2::element_blank())
     })
     all_plots <- cowplot::plot_grid(plotlist = plots)
